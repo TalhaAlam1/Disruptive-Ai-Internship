@@ -5,25 +5,21 @@ import os
 from docx import Document
 import re
 from sentence_transformers import SentenceTransformer
-import fitz  # PyMuPDF for PDFs
+import fitz  
 
 app = Flask(__name__)
 UPLOAD_FOLDER = r'C:\NIC internship work\project\uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Ensure upload folder exists
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# Initialize the SentenceTransformer model
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# Helper functions for text extraction
+
 def extract_text_from_pdf(pdf_path):
     text = ""
     doc = fitz.open(pdf_path)
     for page in doc:
         text += page.get_text()
-    doc.close()  # Close the document after processing
+    doc.close()  
     return text
 
 def extract_text_from_excel(excel_path):
@@ -49,7 +45,7 @@ def preprocess_text(text):
 def embed_text(text):
     return model.encode(text)
 
-# Route to handle Excel file upload
+
 @app.route('/upload/excel', methods=['POST'])
 def upload_excel():
     if 'file' not in request.files:
@@ -66,7 +62,7 @@ def upload_excel():
         return jsonify({'data': text, 'vector': vector.tolist()}), 200
     return jsonify({'error': 'Invalid file format'}), 400
 
-# Route to handle PDF file upload
+
 @app.route('/upload/pdf', methods=['POST'])
 def upload_pdf():
     if 'file' not in request.files:
@@ -83,7 +79,7 @@ def upload_pdf():
         return jsonify({'text': text, 'vector': vector.tolist()}), 200
     return jsonify({'error': 'Invalid file format'}), 400
 
-# Route to handle document file upload
+
 @app.route('/upload/document', methods=['POST'])
 def upload_document():
     if 'file' not in request.files:
@@ -103,7 +99,7 @@ def upload_document():
         return jsonify({'text': text, 'vector': vector.tolist()}), 200
     return jsonify({'error': 'Invalid file format'}), 400
 
-# New route to handle multiple file types
+
 @app.route('/upload/all', methods=['POST'])
 def upload_all():
     if 'file' not in request.files:
