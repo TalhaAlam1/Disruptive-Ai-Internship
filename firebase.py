@@ -4,12 +4,12 @@ import os
 from docx import Document
 import re
 from sentence_transformers import SentenceTransformer
-import fitz  # PyMuPDF for PDFs
+import fitz  
 import firebase_admin
 from firebase_admin import credentials, firestore
 import logging
 
-# Initialize logging
+
 logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
@@ -17,15 +17,15 @@ UPLOAD_FOLDER = r'C:\NIC internship work\neww-proj\uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 
-# Initialize Firebase Admin SDK
+
 cred = credentials.Certificate(r'C:\NIC internship work\neww-proj\bts-jk-firebase.json')
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# Initialize the SentenceTransformer model
+
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# Helper functions for text extraction
+
 def extract_text_from_pdf(pdf_path):
     text = ""
     doc = fitz.open(pdf_path)
@@ -57,7 +57,7 @@ def preprocess_text(text):
 def embed_text(text):
     return model.encode(text)
 
-# Function to push data to Firestore
+
 def push_to_firestore(data):
     try:
         db.collection('documents').add(data)
@@ -65,7 +65,7 @@ def push_to_firestore(data):
     except Exception as e:
         logging.error("Error pushing data to Firestore: %s", e)
 
-# Route to handle file uploads
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -87,7 +87,7 @@ def upload_file():
         else:
             return jsonify({'error': 'Invalid file format'}), 400
 
-        # Check if text is extracted
+  
         if not text.strip():
             logging.error("No text extracted from the uploaded file.")
             return jsonify({'error': 'No text extracted from the uploaded file.'}), 400
@@ -95,7 +95,7 @@ def upload_file():
         preprocessed_text = preprocess_text(text)
         vector = embed_text(preprocessed_text)
 
-        # Push data to Firestore
+    
         push_to_firestore({
             'text': text,
             'vector': vector.tolist(),
