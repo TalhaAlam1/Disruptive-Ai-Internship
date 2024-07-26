@@ -10,10 +10,7 @@ app = Flask(__name__)
 UPLOAD_FOLDER = r'C:\NIC internship work\project\uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Ensure upload folder exists
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Route to handle Excel file upload
 @app.route('/upload/excel', methods=['POST'])
 def upload_excel():
     if 'file' not in request.files:
@@ -28,7 +25,7 @@ def upload_excel():
         return jsonify(df.to_dict()), 200
     return jsonify({'error': 'Invalid file format'}), 400
 
-# Route to handle PDF file upload
+
 @app.route('/upload/pdf', methods=['POST'])
 def upload_pdf():
     if 'file' not in request.files:
@@ -47,7 +44,7 @@ def upload_pdf():
         return jsonify({'text': text}), 200
     return jsonify({'error': 'Invalid file format'}), 400
 
-# Route to handle document file upload
+
 @app.route('/upload/document', methods=['POST'])
 def upload_document():
     if 'file' not in request.files:
@@ -67,7 +64,7 @@ def upload_document():
         return jsonify({'text': text}), 200
     return jsonify({'error': 'Invalid file format'}), 400
 
-# New route to handle multiple file types
+
 @app.route('/upload/all', methods=['POST'])
 def upload_all():
     if 'file' not in request.files:
