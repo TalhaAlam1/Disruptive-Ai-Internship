@@ -8,7 +8,6 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "D:/Disruptive Ai/New folder"
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-
 @app.route('/upload/excel', methods=['POST'])
 def upload_excel():
     if 'file' not in request.files:
@@ -22,7 +21,6 @@ def upload_excel():
         df = pd.read_excel(file_path)
         return jsonify(df.to_dict()), 200
     return jsonify({'error': 'Invalid file format'}), 400
-
 
 @app.route('/upload/pdf', methods=['POST'])
 def upload_pdf():
@@ -42,7 +40,6 @@ def upload_pdf():
         return jsonify({'text': text}), 200
     return jsonify({'error': 'Invalid file format'}), 400
 
-
 @app.route('/upload/document', methods=['POST'])
 def upload_document():
     if 'file' not in request.files:
@@ -61,7 +58,6 @@ def upload_document():
             text = '\n'.join([para.text for para in doc.paragraphs])
         return jsonify({'text': text}), 200
     return jsonify({'error': 'Invalid file format'}), 400
-
 
 @app.route('/upload/all', methods=['POST'])
 def upload_all():
@@ -91,7 +87,7 @@ def upload_all():
         doc = Document(file_path)
         text = '\n'.join([para.text for para in doc.paragraphs])
         return jsonify({'text': text}), 200
-    
+
     return jsonify({'error': 'Invalid file format'}), 400
 
 if __name__ == '__main__':

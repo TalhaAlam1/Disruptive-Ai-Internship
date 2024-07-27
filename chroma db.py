@@ -3,11 +3,22 @@ import pandas as pd
 from PyPDF2 import PdfReader
 import os
 from docx import Document
+from sklearn.feature_extraction.text import TfidfVectorizer
+import chromadb
+import numpy as np
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "D:/Disruptive Ai/New folder"
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+# Initialize Chroma client and collection
+client = chromadb.Client()
+collection = client.create_collection(name="text_vectors")
+
+def vectorize_text(text):
+    vectorizer = TfidfVectorizer()
+    vectors = vectorizer.fit_transform([text])
+    return vectors.toarray()[0].tolist()  # Convert to list
 
 @app.route('/upload/excel', methods=['POST'])
 def upload_excel():
@@ -20,9 +31,14 @@ def upload_excel():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(file_path)
         df = pd.read_excel(file_path)
-        return jsonify(df.to_dict()), 200
+        text = df.to_string()
+        vector = vectorize_text(text)
+        # Create a unique ID for the document
+        doc_id = f"excel_{file.filename}"
+        # Store vector in ChromaDB with ID
+        collection.add(documents=[text], embeddings=[vector], ids=[doc_id])
+        return jsonify({'vector': vector}), 200
     return jsonify({'error': 'Invalid file format'}), 400
-
 
 @app.route('/upload/pdf', methods=['POST'])
 def upload_pdf():
@@ -34,14 +50,18 @@ def upload_pdf():
     if file and file.filename.endswith('.pdf'):
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(file_path)
+        text = ''
         with open(file_path, 'rb') as f:
             reader = PdfReader(f)
-            text = ''
             for page in reader.pages:
                 text += page.extract_text()
-        return jsonify({'text': text}), 200
+        vector = vectorize_text(text)
+        # Create a unique ID for the document
+        doc_id = f"pdf_{file.filename}"
+        # Store vector in ChromaDB with ID
+        collection.add(documents=[text], embeddings=[vector], ids=[doc_id])
+        return jsonify({'vector': vector}), 200
     return jsonify({'error': 'Invalid file format'}), 400
-
 
 @app.route('/upload/document', methods=['POST'])
 def upload_document():
@@ -59,9 +79,13 @@ def upload_document():
         elif file.filename.endswith('.docx'):
             doc = Document(file_path)
             text = '\n'.join([para.text for para in doc.paragraphs])
-        return jsonify({'text': text}), 200
+        vector = vectorize_text(text)
+        # Create a unique ID for the document
+        doc_id = f"document_{file.filename}"
+        # Store vector in ChromaDB with ID
+        collection.add(documents=[text], embeddings=[vector], ids=[doc_id])
+        return jsonify({'vector': vector}), 200
     return jsonify({'error': 'Invalid file format'}), 400
-
 
 @app.route('/upload/all', methods=['POST'])
 def upload_all():
@@ -72,26 +96,31 @@ def upload_all():
         return jsonify({'error': 'No selected file'}), 400
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
     file.save(file_path)
-
+    
+    text = ''
     if file.filename.endswith('.xlsx'):
         df = pd.read_excel(file_path)
-        return jsonify({'data': df.to_dict()}), 200
+        text = df.to_string()
     elif file.filename.endswith('.pdf'):
         with open(file_path, 'rb') as f:
             reader = PdfReader(f)
-            text = ''
             for page in reader.pages:
                 text += page.extract_text()
-        return jsonify({'text': text}), 200
     elif file.filename.endswith('.txt'):
         with open(file_path, 'r') as f:
             text = f.read()
-        return jsonify({'text': text}), 200
     elif file.filename.endswith('.docx'):
         doc = Document(file_path)
         text = '\n'.join([para.text for para in doc.paragraphs])
-        return jsonify({'text': text}), 200
     
+    if text:
+        vector = vectorize_text(text)
+        # Create a unique ID for the document
+        doc_id = f"all_{file.filename}"
+        # Store vector in ChromaDB with ID
+        collection.add(documents=[text], embeddings=[vector], ids=[doc_id])
+        return jsonify({'vector': vector}), 200
+
     return jsonify({'error': 'Invalid file format'}), 400
 
 if __name__ == '__main__':
