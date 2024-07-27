@@ -1,112 +1,152 @@
 from flask import Flask, request, jsonify
 import pandas as pd
+from PyPDF2 import PdfReader
 import os
 from docx import Document
-import re
-from sentence_transformers import SentenceTransformer
-import fitz  
+from sklearn.feature_extraction.text import TfidfVectorizer
 import firebase_admin
 from firebase_admin import credentials, firestore
-import logging
-
-
-logging.basicConfig(level=logging.DEBUG)
+import re
 
 app = Flask(__name__)
-UPLOAD_FOLDER = r'C:\NIC internship work\neww-proj\uploads'
+UPLOAD_FOLDER = "D:/Disruptive Ai/New folder"
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-
-
-cred = credentials.Certificate(r'C:\NIC internship work\neww-proj\bts-jk-firebase.json')
+# Initialize Firebase Admin SDK
+cred = credentials.Certificate('D:/Disruptive Ai/agent-79934-firebase-adminsdk-ll7wr-2f2c46853e.json')  # Update this path
 firebase_admin.initialize_app(cred)
-db = firestore.client()
+db = firestore.client()  # Initialize Firestore client
 
+def vectorize_text(text):
+    vectorizer = TfidfVectorizer()
+    vectors = vectorizer.fit_transform([text])
+    return vectors.toarray()[0].tolist()  # Convert NumPy array to list
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
+def sanitize_id(filename):
+    # Remove any characters not allowed in Firestore document IDs
+    return re.sub(r'[^\w\s]', '_', filename)
 
-
-def extract_text_from_pdf(pdf_path):
-    text = ""
-    doc = fitz.open(pdf_path)
-    for page in doc:
-        text += page.get_text()
-    doc.close()
-    return text
-
-def extract_text_from_excel(excel_path):
-    text = ""
-    df = pd.read_excel(excel_path)
-    for column in df.columns:
-        text += ' '.join(df[column].astype(str).tolist())
-    return text
-
-def extract_text_from_doc(doc_path):
-    text = ""
-    doc = Document(doc_path)
-    for paragraph in doc.paragraphs:
-        text += paragraph.text + "\n"
-    return text
-
-def preprocess_text(text):
-    text = text.lower()
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'[^\w\s]', '', text)
-    return text
-
-def embed_text(text):
-    return model.encode(text)
-
-
-def push_to_firestore(data):
-    try:
-        db.collection('documents').add(data)
-        logging.debug("Data pushed to Firestore successfully: %s", data)
-    except Exception as e:
-        logging.error("Error pushing data to Firestore: %s", e)
-
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
+@app.route('/upload/excel', methods=['POST'])
+def upload_excel():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
+    if file and file.filename.endswith('.xlsx'):
+        try:
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            file.save(file_path)
+            df = pd.read_excel(file_path)
+            text = df.to_string()
+            vector = vectorize_text(text)
+            doc_id = sanitize_id(f"excel_{file.filename}")
+            # Store data in Firestore
+            db.collection('documents').document(doc_id).set({
+                'text': text,
+                'vector': vector
+            })
+            return jsonify({'vector': vector}), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'Invalid file format'}), 400
 
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(file_path)
+@app.route('/upload/pdf', methods=['POST'])
+def upload_pdf():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if file and file.filename.endswith('.pdf'):
+        try:
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            file.save(file_path)
+            text = ''
+            with open(file_path, 'rb') as f:
+                reader = PdfReader(f)
+                for page in reader.pages:
+                    text += page.extract_text()
+            vector = vectorize_text(text)
+            doc_id = sanitize_id(f"pdf_{file.filename}")
+            # Store data in Firestore
+            db.collection('documents').document(doc_id).set({
+                'text': text,
+                'vector': vector
+            })
+            return jsonify({'vector': vector}), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'Invalid file format'}), 400
 
+@app.route('/upload/document', methods=['POST'])
+def upload_document():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if file and (file.filename.endswith('.txt') or file.filename.endswith('.docx')):
+        try:
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            file.save(file_path)
+            if file.filename.endswith('.txt'):
+                with open(file_path, 'r') as f:
+                    text = f.read()
+            elif file.filename.endswith('.docx'):
+                doc = Document(file_path)
+                text = '\n'.join([para.text for para in doc.paragraphs])
+            vector = vectorize_text(text)
+            doc_id = sanitize_id(f"document_{file.filename}")
+            # Store data in Firestore
+            db.collection('documents').document(doc_id).set({
+                'text': text,
+                'vector': vector
+            })
+            return jsonify({'vector': vector}), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'Invalid file format'}), 400
+
+@app.route('/upload/all', methods=['POST'])
+def upload_all():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
     try:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(file_path)
+        
+        text = ''
         if file.filename.endswith('.xlsx'):
-            text = extract_text_from_excel(file_path)
+            df = pd.read_excel(file_path)
+            text = df.to_string()
         elif file.filename.endswith('.pdf'):
-            text = extract_text_from_pdf(file_path)
+            with open(file_path, 'rb') as f:
+                reader = PdfReader(f)
+                for page in reader.pages:
+                    text += page.extract_text()
+        elif file.filename.endswith('.txt'):
+            with open(file_path, 'r') as f:
+                text = f.read()
         elif file.filename.endswith('.docx'):
-            text = extract_text_from_doc(file_path)
-        else:
-            return jsonify({'error': 'Invalid file format'}), 400
-
-  
-        if not text.strip():
-            logging.error("No text extracted from the uploaded file.")
-            return jsonify({'error': 'No text extracted from the uploaded file.'}), 400
-
-        preprocessed_text = preprocess_text(text)
-        vector = embed_text(preprocessed_text)
-
-    
-        push_to_firestore({
-            'text': text,
-            'vector': vector.tolist(),
-            'file_type': file.filename.split('.')[-1]
-        })
-
-        return jsonify({'text': text, 'vector': vector.tolist()}), 200
-
+            doc = Document(file_path)
+            text = '\n'.join([para.text for para in doc.paragraphs])
+        
+        if text:
+            vector = vectorize_text(text)
+            doc_id = sanitize_id(f"all_{file.filename}")
+            # Store data in Firestore
+            db.collection('documents').document(doc_id).set({
+                'text': text,
+                'vector': vector
+            })
+            return jsonify({'vector': vector}), 200
+        return jsonify({'error': 'No text extracted'}), 400
     except Exception as e:
-        logging.error("Error during file upload: %s", e)
-        return jsonify({'error': 'Failed to process file'}), 500
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
