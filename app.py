@@ -11,7 +11,7 @@ UPLOAD_FOLDER = r"D:\D-AI\files"
 VECTOR_FOLDER = r"D:\D-AI\filesvector_data"
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['VECTOR_FOLDER'] = VECTOR_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # Set max upload size to 16 MB
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -41,7 +41,7 @@ def handle_file_upload(file, file_type):
     text = ""
     
     try:
-        # Extract text from the uploaded file
+        
         if file_type == "excel":
             df = pd.read_excel(file_path)
             text = df.to_string()
@@ -58,11 +58,11 @@ def handle_file_upload(file, file_type):
                 doc = Document(file_path)
                 text = '\n'.join([para.text for para in doc.paragraphs])
 
-        # Vectorize the text
+       
         vector = vectorize_text(text)
         doc_id = f"{file_type}_{file.filename}"
         
-        # Save vector to file
+      
         save_result = save_vector(vector, doc_id)
         if save_result is True:
             return vector, doc_id
