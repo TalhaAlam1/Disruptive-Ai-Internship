@@ -1,148 +1,122 @@
-from flask import Flask, request, jsonify
-import pandas as pd
-from PyPDF2 import PdfReader
 import os
+import pandas as pd
+from flask import Flask, request, jsonify
+from PyPDF2 import PdfReader
 from docx import Document
-from sklearn.feature_extraction.text import TfidfVectorizer
-import json
+from sentence_transformers import SentenceTransformer
 import chromadb
+import logging
+from transformers import pipeline
 
 app = Flask(__name__)
-UPLOAD_FOLDER = r"D:\rag\files"
-VECTOR_FOLDER = r"D:\rag\files\filesvector_data"
+UPLOAD_FOLDER = r"D:\RAG-IMP\data"
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['VECTOR_FOLDER'] = VECTOR_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
-
-# Initialize Chroma client and collection
-client = chromadb.Client()
-collection = client.create_collection(name="text_vectors")
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
-if not os.path.exists(app.config['VECTOR_FOLDER']):
-    os.makedirs(app.config['VECTOR_FOLDER'])
 
-# Initialize a global vectorizer
-vectorizer = TfidfVectorizer()
+# Initialize logging
+logging.basicConfig(level=logging.INFO)
 
-def vectorize_text(text):
+# Initialize ChromaDB client with the new API
+chroma_client = chromadb.PersistentClient(path="chroma_persist")  # specify the directory for persistence
+
+try:
+    collection = chroma_client.create_collection(name="document_vectors")
+except Exception as e:
+    logging.error(f"Error creating collection: {e}")
+    # Retrieve the existing collection if it already exists
+    collection = chroma_client.get_collection(name="document_vectors")
+
+# Load the Hugging Face model for embeddings
+model_name = 'sentence-transformers/all-MiniLM-L6-v2'
+embedding_model = SentenceTransformer(model_name)
+
+# Initialize the QA pipeline
+qa_pipeline = pipeline("question-answering", model="distilbert-base-cased-distilled-squad")
+
+def store_vector_in_chromadb(text, metadata):
     try:
-        
-        vector = vectorizer.transform([text])  
-        return vector.toarray()[0]
-    except Exception as e:
-        return {'error': str(e)}
+        # Convert embedding to list
+        vector = embedding_model.encode(text).tolist()
+        logging.info(f"Attempting to store vector for {metadata['filename']}")
 
-def save_vector(vector, doc_id):
-    try:
-        print(f"Saving vector for document ID: {doc_id}")  
-        collection.add(documents=[doc_id], embeddings=[vector.tolist()], ids=[doc_id])
-        print(f"Successfully saved vector for document ID: {doc_id}")  
-        
-        
-        vector_path = os.path.join(app.config['VECTOR_FOLDER'], f"{doc_id}.json")
-        with open(vector_path, 'w') as f:
-            json.dump({'vector': vector.tolist(), 'document_id': doc_id}, f)
-        
-        return True
+        collection.add(
+            documents=[text],
+            embeddings=[vector],
+            ids=[metadata['filename']],
+            metadatas=[metadata]
+        )
+        logging.info(f"Successfully stored vector for {metadata['filename']}")
     except Exception as e:
-        print(f"Error saving vector: {str(e)}")  # Log error
-        return {'error': str(e)}
+        logging.error(f"Error storing vector in ChromaDB: {e}")
 
-def handle_file_upload(file, file_type):
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
     file.save(file_path)
-    text = ""
     
+    text = ''
     try:
-        if file_type == "excel":
+        if file.filename.endswith('.xlsx'):
             df = pd.read_excel(file_path)
-            text = df.to_string()
-        elif file_type == "pdf":
+            text = df.to_string(index=False)
+        elif file.filename.endswith('.pdf'):
             with open(file_path, 'rb') as f:
                 reader = PdfReader(f)
                 for page in reader.pages:
-                    text += page.extract_text() or "" 
-        elif file_type == "document":
-            if file.filename.endswith('.txt'):
-                with open(file_path, 'r') as f:
-                    text = f.read()
-            elif file.filename.endswith('.docx'):
-                doc = Document(file_path)
-                text = '\n'.join([para.text for para in doc.paragraphs])
-
+                    text += page.extract_text() or ''
+        elif file.filename.endswith('.txt'):
+            with open(file_path, 'r') as f:
+                text = f.read()
+        elif file.filename.endswith('.docx'):
+            doc = Document(file_path)
+            text = '\n'.join([para.text for para in doc.paragraphs])
         
-        if collection.count() == 0:
-            vectorizer.fit([text])  
-        
-        vector = vectorize_text(text)
-        if isinstance(vector, dict) and 'error' in vector:
-            return vector, None  
-        
-        doc_id = f"{file_type}_{file.filename}"
-        save_result = save_vector(vector, doc_id)
-        
-        if save_result is True:
-            return vector, doc_id
+        if text.strip():
+            metadata = {'filename': file.filename, 'file_type': file.filename.split('.')[-1]}
+            store_vector_in_chromadb(text, metadata)
+            return jsonify({'message': 'Vector stored successfully'}), 200
         else:
-            return save_result, None
-            
-    except Exception as e:
-        return {'error': str(e)}, None
+            return jsonify({'error': 'No text found in file'}), 400
     finally:
         os.remove(file_path)
 
-@app.route('/upload/excel', methods=['POST'])
-def upload_excel():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    if file and file.filename.endswith('.xlsx'):
-        vector, doc_id = handle_file_upload(file, 'excel')
-        if isinstance(vector, dict) and 'error' in vector:
-            return jsonify(vector), 500
-        return jsonify({'vector': vector.tolist(), 'document_id': doc_id}), 200
-    return jsonify({'error': 'Invalid file format'}), 400
+@app.route('/retrieve_and_answer', methods=['POST'])
+def retrieve_and_answer():
+    data = request.json
+    query = data.get('query', '')
 
-@app.route('/upload/pdf', methods=['POST'])
-def upload_pdf():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    if file and file.filename.endswith('.pdf'):
-        vector, doc_id = handle_file_upload(file, 'pdf')
-        if isinstance(vector, dict) and 'error' in vector:
-            return jsonify(vector), 500
-        return jsonify({'vector': vector.tolist(), 'document_id': doc_id}), 200
-    return jsonify({'error': 'Invalid file format'}), 400
-
-@app.route('/upload/document', methods=['POST'])
-def upload_document():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    if file and (file.filename.endswith('.txt') or file.filename.endswith('.docx')):
-        vector, doc_id = handle_file_upload(file, 'document')
-        if isinstance(vector, dict) and 'error' in vector:
-            return jsonify(vector), 500
-        return jsonify({'vector': vector.tolist(), 'document_id': doc_id}), 200
-    return jsonify({'error': 'Invalid file format'}), 400
-
-@app.route('/vectors', methods=['GET'])
-def get_vectors():
     try:
-        results = collection.query()  
-        return jsonify(results), 200
+        # Generate query embedding
+        query_vector = embedding_model.encode(query).tolist()
+
+        # Retrieve similar vectors
+        results = collection.query(query_embeddings=[query_vector], n_results=5)  # Retrieve top 5 results
+
+        # Extract documents from results
+        documents = [result['document'] for result in results['documents']]
+
+        # Use the QA pipeline to generate an answer
+        answer = generate_answer(query, documents)
+
+        return jsonify({'answer': answer}), 200
     except Exception as e:
-        return jsonify({'error': f"Error fetching vectors: {str(e)}"}), 500
+        logging.error(f"Error retrieving and answering: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def generate_answer(query, documents):
+    context = " ".join(documents)
+    result = qa_pipeline(question=query, context=context)
+    return result['answer']
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5001)
+
 
